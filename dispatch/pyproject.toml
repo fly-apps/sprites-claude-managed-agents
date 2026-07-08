@@ -1,0 +1,29 @@
+[project]
+name = "sprites-claude-managed-agents-dispatch"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "anthropic>=0.116",
+    "fastapi[standard]>=0.139.0",
+    "pydantic-settings>=2.7",
+    "sprites-claude-managed-agents-worker",
+    "sprites-py>=0.2",
+    "standardwebhooks>=1.0.1",
+]
+classifiers = ["Private :: Do Not Upload"]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.5.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+sprites-claude-managed-agents-worker = { workspace = true }
+
+[tool.fastapi]
+entrypoint = "sprites_claude_managed_agents_dispatch.main:app"

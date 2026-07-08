@@ -1,0 +1,17 @@
+[project]
+name = "sprites-claude-managed-agents-worker"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "anthropic>=0.116.0",
+    "httpx>=0.28",
+]
+classifiers = ["Private :: Do Not Upload"]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[project.scripts]
+worker = "sprites_claude_managed_agents_worker.main:main"
