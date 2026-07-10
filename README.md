@@ -2,7 +2,7 @@
 
 A reference control plane that runs [Claude self-hosted sandbox](https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes) sessions as [Sprites](https://sprites.dev/).
 
-Sprites are full computers for your agents. Unlike ephemeral sandboxes, Sprites are persistent, and sessions run in a Sprite will stick around for as long as you need them. Connect with `sprite console` and pick up right where Claude left off.
+Sprites are full computers for your agents. Unlike ephemeral sandboxes, Sprites are persistent, and sessions run in a Sprite stick around for as long as you need them. Connect with `sprite console` and pick up right where Claude left off.
 
 In addition to persistence, Sprites offer:
 
@@ -18,13 +18,12 @@ In addition to persistence, Sprites offer:
 > [!NOTE]
 > The [Sprites docs](https://docs.sprites.dev/integrations/claude-managed-agents/) contain a more detailed setup guide.
 
-This project has two components. The `dispatcher` is a [Fly App](https://fly.io/docs/apps/overview/) which manages sessions and hands out work. The `worker` is a Sprite that receives tool calls from Claude and executes them in its sandbox. Every Claude session has a unique `worker` Sprite which can be cleaned up or archived to visit later.
+This project has two components. The [`dispatcher`](./dispatch) is a [Fly App](https://fly.io/docs/apps/overview/) which manages sessions and hands out work. The [`worker`](./worker) is a Sprite that receives tool calls from Claude and executes them in its sandbox. Every Claude session has a unique `worker` Sprite which can be cleaned up or archived to revisit later.
 
 You'll need:
 
 - [`flyctl`](https://fly.io/docs/flyctl/install/) installed (and optionally [`sprite`](https://docs.sprites.dev/quickstart/))
 - Access to the [Claude Platform Console](https://platform.claude.com)
-- An existing Claude Managed Agents agent (note its agent ID) and a self_hosted environment (note its env_... id).
 
 ### Preparing an environment
 
@@ -35,7 +34,7 @@ fly launch --no-deploy
 ```
 
 > [!TIP]
-> The [Agent Quickstart](https://platform.claude.com/workspaces/default/agent-quickstart) panel in the Claude console walks you through setting up an agent and environment. Make sure the environment type is "self-hosted" and you've created a key.
+> The [Agent Quickstart](https://platform.claude.com/workspaces/default/agent-quickstart) panel in the Claude Console walks you through setting up an agent and environment. Make sure the environment type is "self-hosted" and you've created a key.
 
 In the Claude Console, open the [Agents](https://platform.claude.com/workspaces/default/agents) panel and create a new agent. If you already have one, you can skip this step. Next, open the [Environments](https://platform.claude.com/workspaces/default/environments) panel and create a new environment. For its hosting type, select "Self-hosted". From the environment's page, create a new environment key. Finally, open the [Webhooks](https://platform.claude.com/settings/workspaces/default/webhooks) panel and create a webhook. The endpoint URL will be `https://<your app name>.fly.dev` and the webhook must be subscribed to `session.status_run_started`.
 
@@ -60,7 +59,7 @@ In the Claude Console, create a new [session](https://platform.claude.com/worksp
 
 ## Development
 
-To build this project locally, you'll need `uv` and `docker`. The dispatcher is a `FastAPI` server which interacts with Sprites through the [Python SDK](https://github.com/superfly/sprites-py). 
+To build this project locally, you'll need `uv` and `docker`. The dispatcher is a `FastAPI` server which interacts with Sprites through the [Python SDK](https://github.com/superfly/sprites-py). Set up the [worker closure](#generating-a-worker-closure) and export `VENDOR_TAR_PATH`, then run the developent server:
 
 ```sh
 export ANTHROPIC_ENVIRONMENT_ID=... ANTHROPIC_ENVIRONMENT_KEY=... \
@@ -80,12 +79,12 @@ uv run pytest
 
 ### Generating a worker closure
 
-The worker closure is the bundled sent to the Sprite. Normally this is built during the Docker build. To build it locally:
+The worker closure is the bundle sent to the Sprite. Normally this is built during the Docker build. To build it locally:
 
 ```sh
 UV_PROJECT_ENVIRONMENT=/tmp/worker-venv uv sync --locked --no-dev \
-  --no-editable --package sprites-claude-managed-agents-worker
-tar -czf vendor.tar.gz -C /tmp/worker-venv/lib/python3.14/site-packages .
+    --no-editable --package sprites-claude-managed-agents-worker
+tar -czf vendor.tar.gz -C /tmp/worker-venv/lib/python3.*/site-packages .
 export VENDOR_TAR_PATH=$PWD/vendor.tar.gz
 ```
 
