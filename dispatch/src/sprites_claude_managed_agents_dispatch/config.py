@@ -1,12 +1,17 @@
 """Dispatcher configuration."""
 
 from functools import cache
+from typing import Literal
 
 from pydantic import Field, FilePath, field_validator
 from pydantic_settings import BaseSettings
 
+LogLevels = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
 
 class Settings(BaseSettings):
+    log_level: LogLevels = "INFO"
+
     anthropic_environment_id: str
     anthropic_environment_key: str
     anthropic_webhook_secret: str

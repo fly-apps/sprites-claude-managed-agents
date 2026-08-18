@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Raise config failures before starting the server.
-    get_settings()
+    settings = get_settings()
+    logger.setLevel(settings.log_level)
     yield
 
 

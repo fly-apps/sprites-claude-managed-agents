@@ -1,6 +1,9 @@
 app = 'sprites-claude-managed-agents'
 primary_region = 'dfw'
 
+[env]
+  LOG_LEVEL = 'INFO'
+
 [http_service]
   internal_port = 8080
   force_https = true
