@@ -82,9 +82,12 @@ async def _drain_work() -> list[SpawnResult]:
             continue
         result = SpawnResult(session_id=work.data.id, work_id=work.id)
         try:
+            # Work items don't carry the session's metadata, so read it from the
+            # session itself.
+            session = await _client().beta.sessions.retrieve(work.data.id)
             # Move the sync Sprites SDK off-thread.
             result.sprite = await asyncio.to_thread(
-                spawn, work.data.id, work_id=work.id
+                spawn, work.data.id, work_id=work.id, metadata=session.metadata
             )
             logger.info(
                 "work=%s session=%s -> %s",

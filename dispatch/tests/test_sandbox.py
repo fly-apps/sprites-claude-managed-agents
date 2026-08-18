@@ -1,7 +1,7 @@
 import re
 
 import pytest
-from sprites_claude_managed_agents_dispatch.sandbox import sprite_name
+from sprites_claude_managed_agents_dispatch.sandbox import sprite_labels, sprite_name
 
 
 def test_sprite_name_deterministic_and_safe():
@@ -18,3 +18,12 @@ def test_sprite_name_length_fits():
 def test_sprite_name_rejects_ids_with_no_usable_characters():
     with pytest.raises(ValueError):
         sprite_name("!!!")
+
+
+def test_sprite_labels_ignore_blanks_and_duplicates():
+    assert sprite_labels({"labels": " prod ,,prod,priority, "}) == ["prod", "priority"]
+
+
+def test_sprite_labels_without_metadata():
+    assert sprite_labels({}) == []
+    assert sprite_labels({"labels": ""}) == []

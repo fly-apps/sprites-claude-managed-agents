@@ -4,9 +4,13 @@ One Sprite per session, named after the session id. ``spawn`` installs the
 worker into the Sprite and execs the worker with the session's credentials. The
 worker daemonizes itself so it outlives the exec request, and holds a
 Sprite-wide lock, so spawning is idempotent.
+
+A session can ask for Sprite labels through its create metadata. See
+``sprite_labels`` for the format.
 """
 
 import re
+from collections.abc import Mapping
 from functools import cache
 from importlib.metadata import version
 
@@ -63,12 +67,29 @@ def sprite_name(session_id: str) -> str:
     return f"claude-agent-{slug}"
 
 
-def spawn(session_id: str, *, work_id: str) -> str:
+def sprite_labels(metadata: Mapping[str, str]) -> list[str]:
+    """The Sprite labels requested by a session's create metadata."""
+    labels: list[str] = []
+    for value in metadata.get("labels", "").split(","):
+        label = value.strip()
+        if not label:
+            continue
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
+def spawn(
+    session_id: str, *, work_id: str, metadata: Mapping[str, str] | None = None
+) -> str:
     """Create (or reuse) the session's Sprite and start the worker in it."""
     settings = get_settings()
     name = sprite_name(session_id)
+    labels = sprite_labels(metadata or {})
     try:
-        sprite = _client().create_sprite(name, wait_for_capacity=True)
+        sprite = _client().create_sprite(
+            name, labels=labels or None, wait_for_capacity=True
+        )
     except SpriteError as e:
         # sprites-py only reports the HTTP status in the message. 409 means the
         # Sprite already exists and we can reuse it.

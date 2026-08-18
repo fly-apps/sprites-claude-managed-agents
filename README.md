@@ -57,6 +57,24 @@ Fly.io builds the Docker image and creates two dispatcher Machines. Both Machine
 
 In the Claude Console, create a new [session](https://platform.claude.com/workspaces/default/sessions) with the agent and environment you generated earlier. When the agent attempts to run its first command, the dispatcher will create a Sprite and hand it off to the worker. See your new Sprite in the dashboard, or with `sprite list`.
 
+## Advanced patterns
+
+### Labeling Sprites
+
+> [!NOTE]
+> Restricted API tokens can't set arbitrary labels (otherwise they could bypass those restrictions). To set labels, the app must be configured with an unrestricted Sprites API token.
+
+Labels group Sprites within an organization. Scope an API connector to a label to limit access to specific Sprites. To apply labels to a session's Sprite, set the `labels` field in the create metadata:
+
+```sh
+ant beta:sessions create \
+    --agent "$AGENT_ID" \
+    --environment-id "$ANTHROPIC_ENVIRONMENT_ID" \
+    --metadata '{"labels": "prod,team-x"}'
+```
+
+See a Sprite's labels on the dashboard or with `sprite info`.
+
 ## Development
 
 To build this project locally, you'll need `uv` and `docker`. The dispatcher is a `FastAPI` server which interacts with Sprites through the [Python SDK](https://github.com/superfly/sprites-py). Set up the [worker closure](#generating-a-worker-closure) and export `VENDOR_TAR_PATH`, then run the developent server:
