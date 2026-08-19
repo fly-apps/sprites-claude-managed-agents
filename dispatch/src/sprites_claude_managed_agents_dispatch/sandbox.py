@@ -5,14 +5,17 @@ worker into the Sprite and execs the worker with the session's credentials. The
 worker daemonizes itself so it outlives the exec request, and holds a
 Sprite-wide lock, so spawning is idempotent.
 
-A session can ask for Sprite labels through its create metadata. See
-``sprite_labels`` for the format.
+A session can ask for Sprite labels and seed files through its create
+metadata. See ``sprite_labels`` and ``sprite_files`` for the formats.
 """
 
+import json
+import posixpath
 import re
 from collections.abc import Mapping
 from functools import cache
 from importlib.metadata import version
+from urllib.parse import urlsplit
 
 from sprites import SpritesClient
 from sprites.exceptions import SpriteError
@@ -22,6 +25,12 @@ from .config import get_settings
 
 WORKER_MODULE = "sprites_claude_managed_agents_worker.main"
 WORKDIR = "/workspace"
+
+# Where seed files land, matching the hosted sandbox's uploads directory.
+UPLOADS_DIR = "/mnt/session/uploads"
+
+# The files the worker downloads on first boot, as JSON. See ``sprite_files``.
+FILES_ENV = "CMA_SESSION_FILES"
 
 # Where the worker closure is unpacked, and where the pip fallback installs a
 # fresh copy. DEPS_DIR precedes VENDOR_DIR on PYTHONPATH so fallback installs
@@ -79,6 +88,48 @@ def sprite_labels(metadata: Mapping[str, str]) -> list[str]:
     return labels
 
 
+def sprite_files(metadata: Mapping[str, str]) -> dict[str, str]:
+    """The files requested by a session's create metadata.
+
+    Metadata values are strings, so the mapping rides along as a JSON object of
+    mount path to https URL:
+
+        {"files": "{\"/data.csv\": \"https://example.com/data.csv\"}"}
+
+    Mount paths are absolute, but rooted under ``UPLOADS_DIR``, so ``/data.csv``
+    lands at ``/mnt/session/uploads/data.csv``. The worker downloads them the
+    first time it boots in the Sprite, creating parent directories as it goes.
+    """
+    raw = metadata.get("files", "").strip()
+    if not raw:
+        return {}
+    try:
+        requested = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"metadata 'files' is not valid JSON: {e}") from None
+    if not isinstance(requested, dict):
+        raise ValueError("metadata 'files' must be a JSON object of path to url")
+
+    files: dict[str, str] = {}
+    for path, url in requested.items():
+        if not isinstance(url, str):
+            raise ValueError(f"file url for {path!r} must be a string")
+        if urlsplit(url).scheme != "https":
+            raise ValueError(f"file url {url!r} is not https")
+        files[_upload_path(path)] = url
+    return files
+
+
+def _upload_path(path: str) -> str:
+    """Root a mount path under UPLOADS_DIR, refusing to escape it."""
+    if posixpath.basename(path) in ("", "."):
+        raise ValueError(f"mount path {path!r} does not name a file")
+    rooted = posixpath.normpath(posixpath.join(UPLOADS_DIR, path.lstrip("/")))
+    if not rooted.startswith(f"{UPLOADS_DIR}/"):
+        raise ValueError(f"mount path {path!r} is outside of {UPLOADS_DIR}")
+    return rooted
+
+
 def spawn(
     session_id: str, *, work_id: str, metadata: Mapping[str, str] | None = None
 ) -> str:
@@ -86,6 +137,9 @@ def spawn(
     settings = get_settings()
     name = sprite_name(session_id)
     labels = sprite_labels(metadata or {})
+    # Parse before creating the Sprite so a bad request fails without leaving
+    # one behind.
+    files = sprite_files(metadata or {})
     try:
         sprite = _client().create_sprite(
             name, labels=labels or None, wait_for_capacity=True
@@ -112,6 +166,7 @@ def spawn(
             "ANTHROPIC_ENVIRONMENT_ID": settings.anthropic_environment_id,
             "ANTHROPIC_SESSION_ID": session_id,
             "ANTHROPIC_WORK_ID": work_id,
+            FILES_ENV: json.dumps(files),
         },
         check=True,
     )

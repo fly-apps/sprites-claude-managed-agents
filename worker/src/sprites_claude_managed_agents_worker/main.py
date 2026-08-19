@@ -21,7 +21,7 @@ from typing import IO
 
 from anthropic import AsyncAnthropic
 
-from . import tasks
+from . import files, tasks
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -73,6 +73,9 @@ async def _run_session() -> None:
         tasks.keepalive(TASK_NAME, TASK_EXPIRE, TASK_HEARTBEAT_SECONDS),
         AsyncAnthropic(auth_token=environment_key) as client,
     ):
+        # Seed the uploads inside the keep-alive, so a slow download can't
+        # let the Sprite pause out from under us.
+        await files.seed(files.requested())
         await client.beta.environments.work.worker(
             environment_key=environment_key,
             workdir=WORKDIR,

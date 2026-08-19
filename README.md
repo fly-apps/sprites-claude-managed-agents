@@ -75,6 +75,19 @@ ant beta:sessions create \
 
 See a Sprite's labels on the dashboard or with `sprite info`.
 
+### Seeding files
+
+A session can name files to fetch before the agent's first tool call. Set the `files` field in the create metadata to a JSON object mapping mount paths to https URLs:
+
+```sh
+ant beta:sessions create \
+    --agent "$AGENT_ID" \
+    --environment-id "$ANTHROPIC_ENVIRONMENT_ID" \
+    --metadata '{"files": "{\"/data.csv\": \"https://example.com/data.csv\"}"}'
+```
+
+Mount paths follow the same rules as the hosted sandbox: they're absolute, but rooted under the session's uploads directory, so `/data.csv` lands at `/mnt/session/uploads/data.csv` and can't escape it. Parent directories are created automatically. The worker downloads each file itself, inside the Sprite. Downloads only happen the first time the worker boots in a Sprite. A file that fails to download is logged to `/var/log/cma-worker.log` and skipped, and the session still starts.
+
 ## Development
 
 To build this project locally, you'll need `uv` and `docker`. The dispatcher is a `FastAPI` server which interacts with Sprites through the [Python SDK](https://github.com/superfly/sprites-py). Set up the [worker closure](#generating-a-worker-closure) and export `VENDOR_TAR_PATH`, then run the developent server:
