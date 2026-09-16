@@ -1,17 +1,37 @@
 import json
 import re
 
+import httpx
 import pytest
 from sprites_claude_managed_agents_dispatch.sandbox import (
+    METADATA_MAX_BYTES,
     UPLOADS_DIR,
+    resolve_metadata,
     sprite_files,
     sprite_labels,
     sprite_name,
 )
 
+METADATA_URL = "https://example.com/session.json"
+
 
 def files_metadata(spec: object) -> dict[str, str]:
     return {"files": json.dumps(spec)}
+
+
+def hosting(body: object, *, status: int = 200) -> httpx.Client:
+    """A client serving ``body`` as the hosted metadata payload."""
+    content = body if isinstance(body, bytes) else json.dumps(body).encode()
+
+    def handle(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, content=content)
+
+    return httpx.Client(transport=httpx.MockTransport(handle), follow_redirects=True)
+
+
+def resolve(metadata: dict[str, str], client: httpx.Client) -> dict[str, str]:
+    with client:
+        return resolve_metadata(metadata, client=client)
 
 
 def test_sprite_name_deterministic_and_safe():
@@ -86,3 +106,57 @@ def test_sprite_files_rejects_malformed_specs():
         sprite_files(files_metadata(["https://example.com/x"]))
     with pytest.raises(ValueError):
         sprite_files(files_metadata({"/x": 1}))
+
+
+def test_resolve_metadata_without_a_url():
+    assert resolve_metadata({"labels": "prod"}) == {"labels": "prod"}
+    with pytest.raises(ValueError):
+        assert resolve_metadata({"metadata": "  "}) == {}
+
+
+def test_resolve_metadata_encodes_nested_values_as_json():
+    resolved = resolve(
+        {"metadata": METADATA_URL},
+        hosting({"files": {"/data.csv": "https://example.com/x"}}),
+    )
+    assert sprite_files(resolved) == {
+        f"{UPLOADS_DIR}/data.csv": "https://example.com/x"
+    }
+
+
+def test_resolve_metadata_rejects_urls_that_are_not_https():
+    with pytest.raises(ValueError):
+        resolve_metadata({"metadata": "http://example.com/session.json"})
+
+
+def test_resolve_metadata_rejects_a_redirect_off_https():
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.scheme == "https":
+            return httpx.Response(302, headers={"location": "http://example.com/x"})
+        return httpx.Response(200, content=b"{}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handle), follow_redirects=True)
+    with pytest.raises(ValueError):
+        resolve({"metadata": METADATA_URL}, client)
+
+
+def test_resolve_metadata_rejects_an_oversized_payload():
+    with pytest.raises(ValueError):
+        resolve(
+            {"metadata": METADATA_URL},
+            hosting({"notes": "x" * (METADATA_MAX_BYTES + 1)}),
+        )
+
+
+def test_resolve_metadata_rejects_malformed_payloads():
+    with pytest.raises(ValueError):
+        resolve({"metadata": METADATA_URL}, hosting(b"not json"))
+    with pytest.raises(ValueError):
+        resolve({"metadata": METADATA_URL}, hosting(["labels"]))
+    with pytest.raises(ValueError):
+        resolve({"metadata": METADATA_URL}, hosting({"metadata": METADATA_URL}))
+
+
+def test_resolve_metadata_raises_on_an_error_response():
+    with pytest.raises(httpx.HTTPStatusError):
+        resolve({"metadata": METADATA_URL}, hosting({}, status=404))

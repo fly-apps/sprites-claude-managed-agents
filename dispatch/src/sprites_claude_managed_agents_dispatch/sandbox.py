@@ -6,7 +6,8 @@ worker daemonizes itself so it outlives the exec request, and holds a
 Sprite-wide lock, so spawning is idempotent.
 
 A session can ask for Sprite labels and seed files through its create
-metadata. See ``sprite_labels`` and ``sprite_files`` for the formats.
+metadata. See ``sprite_labels`` and ``sprite_files`` for the formats. Metadata
+too large for the API's limits can be named by url. See ``resolve_metadata``.
 """
 
 import json
@@ -17,6 +18,7 @@ from functools import cache
 from importlib.metadata import version
 from urllib.parse import urlsplit
 
+import httpx
 from sprites import SpritesClient
 from sprites.exceptions import SpriteError
 from sprites.sprite import Sprite
@@ -31,6 +33,9 @@ UPLOADS_DIR = "/mnt/session/uploads"
 
 # The files the worker downloads on first boot, as JSON. See ``sprite_files``.
 FILES_ENV = "CMA_SESSION_FILES"
+
+METADATA_TIMEOUT = 30.0
+METADATA_MAX_BYTES = 1 << 20
 
 # Where the worker closure is unpacked, and where the pip fallback installs a
 # fresh copy. DEPS_DIR precedes VENDOR_DIR on PYTHONPATH so fallback installs
@@ -74,6 +79,60 @@ def sprite_name(session_id: str) -> str:
     if not slug:
         raise ValueError(f"cannot derive a sprite name from {session_id!r}")
     return f"claude-agent-{slug}"
+
+
+def resolve_metadata(
+    metadata: Mapping[str, str], *, client: httpx.Client | None = None
+) -> dict[str, str]:
+    """A session's create metadata, expanded with a hosted payload.
+
+    The API caps how much metadata a session can carry, so the full metadata
+    can be hosted as a JSON object and named by an https url:
+
+        {"metadata": "https://example.com/session.json"}
+    """
+    url = metadata.get("metadata", "")
+    if not url:
+        return dict(metadata)
+    if urlsplit(url.strip()).scheme != "https":
+        raise ValueError(f"metadata url {url!r} is not https")
+
+    if client is None:
+        with httpx.Client(
+            follow_redirects=True, timeout=METADATA_TIMEOUT
+        ) as http_client:
+            fetched = _fetch_metadata(http_client, url)
+    else:
+        fetched = _fetch_metadata(client, url)
+    return fetched
+
+
+def _fetch_metadata(client: httpx.Client, url: str) -> dict[str, str]:
+    """Download the hosted metadata object at ``url``."""
+    body = bytearray()
+    with client.stream("GET", url) as response:
+        response.raise_for_status()
+        if response.url.scheme != "https":
+            raise ValueError(f"metadata url {url!r} redirected off https")
+        for chunk in response.iter_bytes():
+            body += chunk
+            if len(body) > METADATA_MAX_BYTES:
+                raise ValueError(
+                    f"metadata at {url!r} is larger than {METADATA_MAX_BYTES} bytes"
+                )
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"metadata at {url!r} is not valid JSON: {e}") from None
+    if not isinstance(payload, dict):
+        raise ValueError(f"metadata at {url!r} must be a JSON object")
+    if "metadata" in payload:
+        raise ValueError(f"metadata at {url!r} cannot name another metadata URL")
+    return {
+        key: value if isinstance(value, str) else json.dumps(value)
+        for key, value in payload.items()
+    }
 
 
 def sprite_labels(metadata: Mapping[str, str]) -> list[str]:
@@ -136,10 +195,11 @@ def spawn(
     """Create (or reuse) the session's Sprite and start the worker in it."""
     settings = get_settings()
     name = sprite_name(session_id)
-    labels = sprite_labels(metadata or {})
     # Parse before creating the Sprite so a bad request fails without leaving
     # one behind.
-    files = sprite_files(metadata or {})
+    resolved = resolve_metadata(metadata or {})
+    labels = sprite_labels(resolved)
+    files = sprite_files(resolved)
     try:
         sprite = _client().create_sprite(
             name, labels=labels or None, wait_for_capacity=True

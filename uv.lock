@@ -829,6 +829,7 @@ source = { editable = "dispatch" }
 dependencies = [
     { name = "anthropic" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "sprites-claude-managed-agents-worker" },
     { name = "sprites-py" },
@@ -844,6 +845,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.116" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.139.0" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "sprites-claude-managed-agents-worker", editable = "worker" },
     { name = "sprites-py", specifier = ">=0.2" },

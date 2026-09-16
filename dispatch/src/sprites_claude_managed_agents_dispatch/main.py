@@ -110,7 +110,10 @@ async def healthz() -> dict[str, str]:
 @app.post("/")
 async def webhook(request: Request) -> dict[str, object]:
     event = _verify_webhook(await request.body(), request.headers)
-    if event.data.type not in ("session.status_run_started", "session.status_rescheduled"):
+    if event.data.type not in (
+        "session.status_run_started",
+        "session.status_rescheduled",
+    ):
         return {"status": "ignored", "event_type": event.data.type}
 
     results = await _drain_work()
