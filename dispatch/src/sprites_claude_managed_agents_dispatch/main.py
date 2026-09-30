@@ -10,10 +10,12 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from functools import cache
 
 import anthropic
 from anthropic.types.beta import UnwrapWebhookEvent
+from anthropic.types.beta.environments import BetaSelfHostedWork
 from fastapi import FastAPI, HTTPException, Request
 from standardwebhooks import WebhookVerificationError
 from starlette.datastructures import Headers
@@ -23,6 +25,8 @@ from .sandbox import spawn
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+ORPHAN_AGE = timedelta(seconds=30)
 
 
 @asynccontextmanager
@@ -65,6 +69,28 @@ def _verify_webhook(raw: bytes, headers: Headers) -> UnwrapWebhookEvent:
         ) from None
 
 
+async def _spawn_work(work: BetaSelfHostedWork) -> SpawnResult:
+    result = SpawnResult(session_id=work.data.id, work_id=work.id)
+    try:
+        # Work items don't carry the session's metadata, so read it from the
+        # session itself.
+        session = await _client().beta.sessions.retrieve(work.data.id)
+        # Move the sync Sprites SDK off-thread.
+        result.sprite = await asyncio.to_thread(
+            spawn, work.data.id, work_id=work.id, metadata=session.metadata
+        )
+        logger.info(
+            "work=%s session=%s -> %s",
+            work.id,
+            result.session_id,
+            result.sprite,
+        )
+    except Exception:
+        logger.exception("spawn failed for work=%s", work.id)
+        result.error = "spawn failed"
+    return result
+
+
 async def _drain_work() -> list[SpawnResult]:
     """Drain the work queue, spawning a Sprite worker per session."""
     settings = get_settings()
@@ -80,25 +106,21 @@ async def _drain_work() -> list[SpawnResult]:
         if work.data.type != "session":
             logger.info("skipping work=%s type=%s", work.id, work.data.type)
             continue
-        result = SpawnResult(session_id=work.data.id, work_id=work.id)
-        try:
-            # Work items don't carry the session's metadata, so read it from the
-            # session itself.
-            session = await _client().beta.sessions.retrieve(work.data.id)
-            # Move the sync Sprites SDK off-thread.
-            result.sprite = await asyncio.to_thread(
-                spawn, work.data.id, work_id=work.id, metadata=session.metadata
-            )
-            logger.info(
-                "work=%s session=%s -> %s",
-                work.id,
-                result.session_id,
-                result.sprite,
-            )
-        except Exception:
-            logger.exception("spawn failed for work=%s", work.id)
-            result.error = "spawn failed"
-        results.append(result)
+        results.append(await _spawn_work(work))
+
+    cutoff = datetime.now(UTC) - ORPHAN_AGE
+    async for work in _client().beta.environments.work.list(
+        settings.anthropic_environment_id
+    ):
+        if (
+            work.data.type == "session"
+            and work.state == "starting"
+            and work.latest_heartbeat_at is None
+            and work.acknowledged_at is not None
+            and datetime.fromisoformat(work.acknowledged_at) <= cutoff
+        ):
+            logger.info("retrying orphaned work=%s", work.id)
+            results.append(await _spawn_work(work))
     return results
 
 
